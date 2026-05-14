@@ -247,6 +247,10 @@ def _add_backend_settings(env):
 
 ### Frontend Plugin Configuration
 
+This plugin contributes to both frontend stacks.
+
+**Legacy MFE (frontend-plugin-framework):**
+
 ```python
 # Configure MFE slots
 PLUGIN_SLOTS.add_items([
@@ -265,6 +269,32 @@ PLUGIN_SLOTS.add_items([
         }"""
     ),
 ])
+```
+
+**Frontend-base:**
+
+Registers `@openedx/frontend-app-sample` as a frontend-base app and wires it into the bundled site:
+
+```python
+from tutormfe.hooks import FRONTEND_APPS
+
+@FRONTEND_APPS.add()
+def _add_frontend_app_sample(apps):
+    apps["sample"] = {
+        "npm_package": "@openedx/frontend-app-sample",
+        "npm_version": "^1.0.0",
+        "enabled": True,
+    }
+    return apps
+
+hooks.Filters.ENV_PATCHES.add_item((
+    "mfe-site-config-imports",
+    "import sampleApp from '@openedx/frontend-app-sample';",
+))
+hooks.Filters.ENV_PATCHES.add_item((
+    "mfe-site-config",
+    "addApp(siteConfig, sampleApp);",
+))
 ```
 
 ### Environment-Specific Configuration

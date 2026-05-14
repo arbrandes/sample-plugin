@@ -32,7 +32,8 @@ This sample plugin showcases the **Open edX Hooks Extension Framework**, which a
 | **Django App Plugin** | Add models, APIs, views, and business logic | [How to create a plugin app](https://docs.openedx.org/projects/edx-django-utils/en/latest/plugins/how_tos/how_to_create_a_plugin_app.html) | [`backend-plugin-sample/`](./backend-plugin-sample/) | Adding new functionality, APIs, or data models |
 | **Events (Signals)** | React to platform events | [Open edX Events Guide](https://docs.openedx.org/projects/openedx-events/en/latest/) | [`backend-plugin-sample/openedx_plugin_sample/signals.py`](./backend-plugin-sample/openedx_plugin_sample/signals.py) | Integrating with external systems, audit logging |
 | **Filters** | Modify platform behavior | [Using Open edX Filters](https://docs.openedx.org/projects/openedx-filters/en/latest/how-tos/using-filters.html) | [`backend-plugin-sample/openedx_plugin_sample/pipeline.py`](./backend-plugin-sample/openedx_plugin_sample/pipeline.py) | Customizing business logic, URL redirects |
-| **Frontend Slots** | Customize MFE interfaces | [Frontend Plugin Slots](https://docs.openedx.org/en/latest/site_ops/how-tos/use-frontend-plugin-slots.html) | [`frontend-plugin-sample/`](./frontend-plugin-sample/) | UI customization, adding new components |
+| **Frontend Plugin (FPF)** | Customize MFE interfaces via [frontend-plugin-framework](https://github.com/openedx/frontend-plugin-framework) | [Frontend Plugin Slots](https://docs.openedx.org/en/latest/site_ops/how-tos/use-frontend-plugin-slots.html) | [`frontend-plugin-sample/`](./frontend-plugin-sample/) | UI customization on legacy per-MFE images |
+| **Frontend App (frontend-base)** | Customize MFE interfaces via the [frontend-base](https://github.com/openedx/frontend-base) Apps model | [tutor-mfe Frontend-base site](https://github.com/overhangio/tutor-mfe#frontend-base-site) | [`frontend-app-sample/`](./frontend-app-sample/) | UI customization on the bundled frontend-base site |
 | **Brand Packages** | Customize theming | [Open edX Brand Package Interface](https://github.com/openedx/brand-openedx) | [`brand-sample/`](./brand-sample/) | UI theming |
 | **Tutor Plugin** | Deploy plugins easily | [Tutor Plugin Development](https://docs.tutor.edly.io/) | [`tutor-contrib-sample/`](./tutor-contrib-sample/) | Simplified deployment and configuration |
 
@@ -49,13 +50,25 @@ This sample plugin showcases the **Open edX Hooks Extension Framework**, which a
 tutor mounts add "$PWD/backend-plugin-sample"
 
 # Rebuild image, run migrations, reboot containers:
-tutor dev launch  
+tutor dev launch
 
-# Frontend Plugin Setup (for learner-dashboard MFE development)
-# Add env.config.jsx and module.config.js (see frontend-plugin-sample/README.md)
-# Then, install and run.
+# Frontend setup. The tutor-contrib-sample plugin registers both frontend
+# siblings.
+#
+# Legacy FPF: set up env.config.jsx and module.config.js,
+# then install and run the learner-dashboard MFE (see
+# frontend-plugin-sample/README.md for details).
 cd path/to/frontend-app-learner-dashboard && npm ci && npm run dev
+#
+# Frontend-base: flip apps["learner-dashboard"]["enabled"] = True
+# in your own Tutor plugin, set up a fork of frontend-template-site
+# with frontend-app-sample in packages/ (see frontend-app-sample/README.md
+# for details), then:
+cd path/to/frontend-site && npm i && npm run dev:packages
 ```
+
+> [!NOTE]
+> This carries both the legacy `frontend-plugin-sample/` (frontend-plugin-framework) and a `frontend-app-sample/` sibling that targets tutor-mfe's [frontend-base site](https://github.com/overhangio/tutor-mfe#frontend-base-site). The Tutor plugin in `tutor-contrib-sample/` registers both. For the conceptual differences between the two stacks, see [Port a Frontend Plugin from frontend-plugin-framework to frontend-base](https://docs.openedx.org/en/latest/site_ops/how-tos/port-frontend-plugin-to-frontend-base.html).
 
 ### Option 2: Development without Tutor
 
@@ -91,7 +104,8 @@ Use the table above to identify which type of plugin matches your needs. You can
 - **Backend**: Start with [`backend-plugin-sample/openedx_plugin_sample/apps.py`](./backend-plugin-sample/openedx_plugin_sample/apps.py) to understand plugin registration
 - **Events**: Examine [`backend-plugin-sample/openedx_plugin_sample/signals.py`](./backend-plugin-sample/openedx_plugin_sample/signals.py) for event handling patterns
 - **Filters**: Review [`backend-plugin-sample/openedx_plugin_sample/pipeline.py`](./backend-plugin-sample/openedx_plugin_sample/pipeline.py) for behavior modification
-- **Frontend**: Explore [`frontend-plugin-sample/src/plugin.jsx`](./frontend-plugin-sample/src/plugin.jsx) for UI customization
+- **Frontend (FPF)**: Explore [`frontend-plugin-sample/src/plugin.jsx`](./frontend-plugin-sample/src/plugin.jsx) for the legacy React component plugged into `env.config.jsx`
+- **Frontend (frontend-base)**: Explore [`frontend-app-sample/src/app.tsx`](./frontend-app-sample/src/app.tsx) for the App declaration and [`frontend-app-sample/src/CourseList.tsx`](./frontend-app-sample/src/CourseList.tsx) for the React component
 
 ### 4. Run This Sample
 Follow the [Quick Start Guide](#quick-start-guide) to see everything working together.
@@ -115,15 +129,22 @@ sample-plugin/
 │   │   ├── settings/                  # Plugin settings configuration
 │   │   └── urls.py                    # URL routing
 │   └── tests/                         # Comprehensive test examples
-├── frontend-plugin-sample/
-│   ├── README.md                      # Frontend plugin detailed guide
+├── frontend-plugin-sample/             # Legacy FPF version (env.config.jsx)
+│   ├── README.md
 │   ├── src/
-│   │   ├── plugin.jsx                 # React component for MFE slot
-│   │   └── index.jsx                  # Export configuration
-│   └── package.json                   # NPM package configuration
-└── tutor-contrib-sample/
+│   │   ├── plugin.jsx                 # React component for the FPF slot
+│   │   └── index.jsx                  # Named exports
+│   └── package.json
+├── frontend-app-sample/                # frontend-base version (site config; TypeScript)
+│   ├── README.md
+│   ├── src/
+│   │   ├── CourseList.tsx             # React component
+│   │   ├── app.tsx                    # frontend-base App with slot operations
+│   │   └── index.ts                   # Default-exports the App
+│   └── package.json
+└── tutor-contrib-sample/               # Registers both siblings; each self-no-ops when inactive
     ├── README.md                      # Tutor deployment guide
-    └── sample.py               # Tutor plugin configuration
+    └── tutorsample/plugin.py          # Tutor plugin configuration
 ```
 
 ## Development Workflows

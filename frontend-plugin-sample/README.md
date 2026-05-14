@@ -1,6 +1,9 @@
-# Frontend Plugin Implementation Guide
+# Frontend Plugin Implementation Guide (frontend-plugin-framework)
 
 This directory contains a React component that demonstrates how to customize Open edX micro-frontends (MFEs) using the Frontend Plugin Framework. The plugin replaces the default course list in the learner dashboard with a custom implementation that includes course archiving functionality.
+
+> [!NOTE]
+> This is the legacy FPF sibling of [`../frontend-app-sample/`](../frontend-app-sample/), which targets the newer [`frontend-base`](https://github.com/openedx/frontend-base) stack. The Tutor plugin in [`../tutor-contrib-sample/`](../tutor-contrib-sample/) installs whichever of the two matches your tutor-mfe configuration: this one when the frontend-base learner-dashboard App is *not* enabled, the frontend-base sibling otherwise. See the [porting guide](https://docs.openedx.org/en/latest/site_ops/how-tos/port-frontend-plugin-to-frontend-base.html) for the differences between the two.
 
 ## Table of Contents
 
