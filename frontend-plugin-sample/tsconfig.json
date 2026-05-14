@@ -1,0 +1,12 @@
+{
+  "extends": "@openedx/frontend-base/tools/tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/**/*"
+  ]
+}

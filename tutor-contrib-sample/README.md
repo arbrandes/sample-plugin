@@ -1,453 +1,189 @@
-# Tutor Plugin Configuration Guide
+# Tutor Plugin Configuration Guide (frontend-base)
 
-This directory contains Tutor plugin configuration for easy deployment of both backend and frontend plugins in a Tutor-based Open edX deployment.
+This directory contains a Tutor plugin that wires the sample backend plugin (Django app) and the sample frontend-base App into a Tutor-managed Open edX deployment.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Plugin Configuration](#plugin-configuration)
-- [Installation Steps](#installation-steps)
+- [What this plugin does](#what-this-plugin-does)
+- [Installation](#installation)
 - [Development vs Production](#development-vs-production)
-- [Configuration Options](#configuration-options)
+- [Migrating from the FPF version of this plugin](#migrating-from-the-fpf-version-of-this-plugin)
 - [Troubleshooting](#troubleshooting)
-- [Advanced Configuration](#advanced-configuration)
 
 ## Overview
 
-This Tutor plugin simplifies the deployment of the sample plugin by:
+This plugin assumes a tutor-mfe deployment that uses the **frontend-base site** instead of (or alongside) the legacy per-MFE images. In frontend-base, all frontend apps live in a single bundled site, and customizations are expressed as `App` objects registered with the site config rather than as `env.config.jsx` plugin slots.
 
-- **Backend Integration**: Automatically installs the Django app plugin
-- **Frontend Integration**: Configures MFE slots for the custom components
-- **Environment Setup**: Handles configuration across different deployment environments
-- **Dependency Management**: Ensures all required packages are installed
-
-**What is Tutor?**: Tutor is the official Docker-based deployment method for Open edX, providing simple commands for installation, configuration, and maintenance.
-
-**Official Documentation:**
-- [Tutor Documentation](https://docs.tutor.edly.io/)
+**Official documentation:**
+- [tutor-mfe](https://github.com/overhangio/tutor-mfe) (see the "Frontend-base site" section)
+- [frontend-base](https://github.com/openedx/frontend-base)
 - [Tutor Plugin Development](https://docs.tutor.edly.io/plugins/index.html)
 
-## Plugin Configuration
+## What this plugin does
 
-**File**: [`sample.py`](./sample.py)
+The plugin file is [`tutorsample/plugin.py`](./tutorsample/plugin.py). Each block below maps to a section of that file.
 
-### Current Configuration
-
-The current configuration demonstrates basic Tutor plugin structure:
+### Backend installation
 
 ```python
-from tutormfe.hooks import PLUGIN_SLOTS
-
-PLUGIN_SLOTS.add_items([
-    # Replace the course_list
-    (
-        "learner-dashboard",
-        "custom_course_list",
-        """
-        {
-          op: PLUGIN_OPERATIONS.Insert,
-          type: DIRECT_PLUGIN,
-          priority: 50,
-          RenderWidget: CourseList
-        }"""
-    ),
-])
+hooks.Filters.ENV_PATCHES.add_item((
+    "openedx-dockerfile-post-python-requirements",
+    "RUN pip install openedx-plugin-sample",
+))
+hooks.Filters.MOUNTED_DIRECTORIES.add_item(("openedx", "backend-plugin-sample"))
 ```
 
-**Note**: The current implementation is a basic template. For full functionality, this needs to be expanded with proper backend installation and frontend package management.
+Installs the published Django app from PyPI into the LMS and CMS images. The `MOUNTED_DIRECTORIES` entry makes `tutor mounts add /path/to/backend-plugin-sample` pip-install the local checkout on top of the published version.
 
-### Complete Plugin Structure
-
-A fully functional Tutor plugin should include:
+### Migrations on first launch
 
 ```python
-from tutor import hooks
-
-# Plugin metadata
-__version__ = "1.0.0"
-
-# Backend plugin installation
-@hooks.Filters.IMAGES_BUILD_MOUNTS.add()
-def _mount_openedx_plugin_sample(mounts):
-    """Mount the sample plugin source code for development."""
-    mounts.append(("sample-plugin-backend", "/openedx/sample-plugin-backend"))
-    return mounts
-
-@hooks.Filters.LMS_ENV.add()
-@hooks.Filters.CMS_ENV.add()
-def _add_plugin_settings(env):
-    """Add plugin-specific environment variables."""
-    env["SAMPLE_PLUGIN_ENABLED"] = True
-    return env
-
-# Install backend plugin
-@hooks.Filters.IMAGES_BUILD.add()
-def _install_backend_plugin(build_config):
-    """Install the backend plugin during image build."""
-    build_config.add_dockerfile_commands(
-        "RUN pip install -e /openedx/sample-plugin-backend"
-    )
-    return build_config
-
-# Frontend plugin configuration  
-from tutormfe.hooks import PLUGIN_SLOTS
-
-PLUGIN_SLOTS.add_items([
-    (
-        "learner-dashboard",
-        "course_list_slot", 
-        """
-        {
-          op: PLUGIN_OPERATIONS.Replace,
-          widget: {
-            id: 'custom_course_list',
-            type: DIRECT_PLUGIN,
-            priority: 50,
-            RenderWidget: CourseList
-          }
-        }"""
-    ),
-])
+hooks.Filters.CLI_DO_INIT_TASKS.add_item((
+    "lms", "./manage.py lms migrate openedx_plugin_sample",
+))
+hooks.Filters.CLI_DO_INIT_TASKS.add_item((
+    "cms", "./manage.py cms migrate openedx_plugin_sample",
+))
 ```
 
-## Installation Steps
+### Frontend integration (`tutormfe.hooks.FRONTEND_APPS`)
+
+```python
+from tutormfe.hooks import FRONTEND_APPS
+
+@FRONTEND_APPS.add()
+def _enable_learner_dashboard(apps):
+    apps["learner-dashboard"]["enabled"] = True
+    return apps
+
+@FRONTEND_APPS.add()
+def _add_sample_app(apps):
+    apps["plugin-sample"] = {
+        "npm_package": "@openedx/plugin-sample",
+        "npm_version": "^1.0.0",
+        "enabled": True,
+    }
+    return apps
+```
+
+The `FRONTEND_APPS` filter is the frontend-base equivalent of declaring an `MFE_APPS` entry. The first hook flips the built-in learner-dashboard App to `enabled` (it ships disabled in tutor-mfe). The second hook registers the sample npm package so tutor-mfe installs it into the site's `node_modules` at build time.
+
+### Wiring the App into the site config
+
+```python
+hooks.Filters.ENV_PATCHES.add_item((
+    "mfe-site-config-imports",
+    "import sampleApp from '@openedx/plugin-sample';",
+))
+hooks.Filters.ENV_PATCHES.add_item((
+    "mfe-site-config",
+    "addApp(siteConfig, sampleApp);",
+))
+```
+
+`mfe-site-config-imports` adds a static import to both `site.config.build.tsx` and `site.config.dev.tsx`. `mfe-site-config` adds code that runs after `siteConfig` is created. `addApp()` merges the App's slot operations into the site.
+
+### Brand override
+
+Unchanged from the legacy version: the plugin points `MFE_CONFIG["PARAGON_THEME_URLS"]["variants"]["light"]["urls"]["brandOverride"]` at a CDN-served copy of `../brand-sample/dist/light.min.css`.
+
+## Installation
 
 ### Prerequisites
 
-1. **Tutor Installation**: Follow [Tutor installation guide](https://docs.tutor.edly.io/install.html)
-2. **Plugin Source**: Have the sample plugin source code available
-3. **Tutor MFE Plugin**: Install tutor-mfe plugin if customizing frontend
+- Tutor >= 20 and [tutor-mfe](https://github.com/overhangio/tutor-mfe) installed.
+- The `tutor-mfe` plugin must be enabled (`tutor plugins enable mfe`).
 
-### Step 1: Install Tutor Plugin
+### Install and enable
 
 ```bash
-# Method 1: Install from local directory
 pip install -e /path/to/sample-plugin/tutor-contrib-sample/
-
-# Method 2: Copy plugin file (simpler for development)
-mkdir -p "$(tutor plugins printroot)"
-cp sample.py "$(tutor plugins printroot)/sample.py"
-```
-
-### Step 2: Enable Plugin
-
-```bash
-# Enable the plugin
 tutor plugins enable sample
-
-# Verify plugin is enabled
-tutor plugins list
+tutor config save
 ```
 
-### Step 3: Deploy Backend Plugin
+Or, for a copy-only install without a Python package:
 
 ```bash
-# For development deployment
-tutor dev launch
+mkdir -p "$(tutor plugins printroot)"
+cp tutorsample/plugin.py "$(tutor plugins printroot)/sample.py"
+tutor plugins enable sample
+```
 
-# For production deployment  
+### Build and launch
+
+```bash
+tutor images build mfe openedx
 tutor local launch
 ```
 
-### Step 4: Configure Frontend (if using MFE customization)
+Image rebuilds are required because both `pip install openedx-plugin-sample` and `npm install @openedx/plugin-sample` happen at image build time. If you only toggled `enabled` on an already-built app, `tutor config save` and a restart are enough.
 
-```bash
-# If using tutor-mfe plugin for frontend customization
-tutor plugins enable mfe
-tutor local launch
-```
+### Verify
 
-### Step 5: Verify Installation
-
-```bash
-# Check backend plugin
-tutor dev exec lms python manage.py shell -c "from openedx_plugin_sample.models import CourseArchiveStatus; print('Backend plugin loaded')"
-
-# Check frontend plugin (visit learner dashboard in browser)
-# Should see custom course list with archive functionality
-```
+1. Visit the learner dashboard on the frontend-base site (default: `http://apps.local.openedx.io:8080`).
+2. Confirm the course list shows the **Archive** / **Unarchive** buttons.
+3. Hit the backend API directly: `http://local.openedx.io:8000/sample-plugin/api/v1/course-archive-status/`.
 
 ## Development vs Production
 
-### Development Mode
+Both `tutor dev` and `tutor local` use the same plugin and the same `FRONTEND_APPS` declarations.
 
-**Characteristics:**
-- Uses `tutor dev` commands
-- Mounts source code for live editing
-- Faster iteration cycles
-- Debug logging enabled
+To hot-reload the frontend App without rebuilding the image:
 
-**Setup Pattern:**
 ```bash
-# Mount backend plugin source
-tutor dev mount /path/to/sample-plugin/backend:/openedx/sample-plugin-backend
-
-# Start development environment
+tutor mounts add /path/to/sample-plugin/frontend-plugin-sample
 tutor dev launch
-
-# Install plugin in development mode
-tutor dev exec lms pip install -e ../sample-plugin-backend
-tutor dev exec lms python manage.py migrate
-tutor dev restart lms
 ```
 
-### Production Mode
+tutor-mfe spins up an `mfe-dev` service that bind-mounts the package into the site's npm workspace.
 
-**Characteristics:**
-- Uses `tutor local` commands
-- Builds plugins into Docker images
-- Optimized for performance
-- Production logging levels
+To hot-reload the backend plugin:
 
-**Setup Pattern:**
 ```bash
-# Enable plugin
-tutor plugins enable sample
-
-# Build and deploy
-tutor local launch
+tutor mounts add /path/to/sample-plugin/backend-plugin-sample
+tutor dev launch
 ```
 
-### Key Differences
+The `MOUNTED_DIRECTORIES` entry above ensures the mount is recognized by tutor's image-build wiring.
 
-| Aspect | Development | Production |
-|--------|-------------|------------|
-| **Installation** | `pip install -e` (editable) | Built into image |
-| **Code Changes** | Live reload | Requires rebuild |
-| **Performance** | Slower (debug mode) | Optimized |
-| **Database** | SQLite/development DB | Production database |
-| **Logging** | Verbose | Production level |
+## Migrating from the FPF version of this plugin
 
-## Configuration Options
+If you have an existing tutor plugin written against the legacy `frontend-plugin-framework`, the mapping is:
 
-### Backend Plugin Configuration
+| Legacy (FPF) | frontend-base |
+| --- | --- |
+| `from tutormfe.hooks import PLUGIN_SLOTS` | `from tutormfe.hooks import FRONTEND_APPS, FRONTEND_SLOTS` |
+| `PLUGIN_SLOTS.add_item(("learner-dashboard", slot_id, "{ op: PLUGIN_OPERATIONS.Insert, ... }"))` | Either register an `App` package via `FRONTEND_APPS` + `mfe-site-config`, or use `FRONTEND_SLOTS.add_items([...])` for simple ops. |
+| `mfe-dockerfile-post-npm-install` + `RUN npm install @org/plugin` | `FRONTEND_APPS["plugin-name"] = { "npm_package": "@org/plugin", "npm_version": "...", "enabled": True }` |
+| `mfe-env-config-buildtime-imports` | `mfe-site-config-imports` |
+| (no equivalent) | `mfe-site-config` to call `addApp(siteConfig, ...)` |
+| Slot id `course_list_slot` (or legacy reverse-DNS) | `org.openedx.frontend.slot.learnerDashboard.courseList.v1` |
+| `PLUGIN_OPERATIONS.Hide` on `default_contents` | `WidgetOperationTypes.REMOVE` with `relatedId: 'defaultContent'` |
+| `PLUGIN_OPERATIONS.Insert` (DIRECT_PLUGIN) | `WidgetOperationTypes.APPEND` (or `PREPEND`/`INSERT_BEFORE`/`INSERT_AFTER`) |
+| `Hide` + `Insert` against `default_contents` | `WidgetOperationTypes.REPLACE` with `relatedId: 'defaultContent'` |
+
+If the upstream plugin can't be ported yet, tutor-mfe ships the [frontend-base-compat](https://github.com/openedx/frontend-base-compat) shim. Opt your plugin's `PLUGIN_SLOTS` contributions into the shim with:
 
 ```python
-# In tutor plugin
-@hooks.Filters.LMS_ENV.add()
-def _add_backend_settings(env):
-    """Configure backend plugin settings."""
-    env.update({
-        # Plugin-specific settings
-        "SAMPLE_PLUGIN_API_RATE_LIMIT": "100/minute",
-        "SAMPLE_PLUGIN_ARCHIVE_RETENTION": "365",
-        
-        # Open edX Filters configuration
-        "OPEN_EDX_FILTERS_CONFIG": {
-            "org.openedx.learning.course.about.render.started.v1": {
-                "pipeline": [
-                    "openedx_plugin_sample.pipeline.ChangeCourseAboutPageUrl"
-                ],
-                "fail_silently": False,
-            }
-        }
-    })
-    return env
+from tutormfe.hooks import FRONTEND_COMPAT_PLUGINS
+FRONTEND_COMPAT_PLUGINS.add_item("sample")
 ```
 
-### Frontend Plugin Configuration
-
-```python
-# Configure MFE slots
-PLUGIN_SLOTS.add_items([
-    (
-        "learner-dashboard",      # Target MFE
-        "course_list_slot",       # Slot identifier  
-        """
-        {
-          op: PLUGIN_OPERATIONS.Replace,  // Operation type
-          widget: {
-            id: 'custom_course_list',     // Unique widget ID
-            type: DIRECT_PLUGIN,          // Plugin type
-            priority: 50,                 // Load priority
-            RenderWidget: CourseList      // Component reference
-          }
-        }"""
-    ),
-])
-```
-
-### Environment-Specific Configuration
-
-```python
-# Different settings for different environments
-@hooks.Filters.LMS_ENV.add() 
-def _configure_by_environment(env):
-    """Apply environment-specific configuration."""
-    if env.get("TUTOR_DEV", False):
-        # Development settings
-        env["SAMPLE_PLUGIN_DEBUG"] = True
-        env["SAMPLE_PLUGIN_API_RATE_LIMIT"] = "1000/minute"
-    else:
-        # Production settings
-        env["SAMPLE_PLUGIN_DEBUG"] = False
-        env["SAMPLE_PLUGIN_API_RATE_LIMIT"] = "60/minute"
-    
-    return env
-```
+or, more granularly, `FRONTEND_COMPAT_SLOTS.add_item((mfe_name, slot_name, plugin_config))`.
 
 ## Troubleshooting
 
-### Common Issues
+**`tutormfe.hooks` doesn't have `FRONTEND_APPS`:** Your tutor-mfe is too old. Upgrade to a release that supports the frontend-base site (see [tutor-mfe README](https://github.com/overhangio/tutor-mfe#frontend-base-site)).
 
-**Plugin Not Loading:**
-```bash
-# Check if plugin is enabled
-tutor plugins list
+**npm complains the package isn't found at build time:** Confirm the package is published, or use a `source` git/file URL on the `FRONTEND_APPS` entry to point at a local checkout. Then `tutor images build mfe`.
 
-# Check plugin syntax
-python -m py_compile sample.py
+**The App installs but the slot doesn't change:**
+- Confirm the learner-dashboard frontend-base App is enabled (the first `FRONTEND_APPS` hook above). Without it, the legacy MFE renders instead.
+- Confirm the `slotId` in `src/app.jsx` matches what the upstream app actually registers.
+- Open the site with the React devtools, find the slot, and check which widgets it renders.
 
-# Verify plugin location
-tutor plugins printroot
-ls -la "$(tutor plugins printroot)/"
-```
+**Plugin works locally but not in production:** Image build vs runtime mismatch. Both `pip install` and `npm install` happen at image build, so any plugin change requires `tutor images build mfe openedx`.
 
-**Backend Plugin Not Installing:**
-```bash
-# Check build logs
-tutor images build lms
-
-# Manual installation for debugging
-tutor dev exec lms pip install -e ../sample-plugin-backend
-tutor dev exec lms python -c "import openedx_plugin_sample; print('Success')"
-
-# Check migrations
-tutor dev exec lms python manage.py showmigrations openedx_plugin_sample
-```
-
-**Frontend Plugin Not Appearing:**
-```bash
-# Check MFE configuration
-tutor dev exec learner-dashboard env | grep PLUGIN
-
-# Verify plugin slots
-tutor dev logs learner-dashboard
-
-# Check browser console for JavaScript errors
-```
-
-**Settings Not Applied:**
-```bash
-# Check environment variables
-tutor dev exec lms env | grep SAMPLE_PLUGIN
-
-# Verify Django settings
-tutor dev exec lms python manage.py shell -c "from django.conf import settings; print(getattr(settings, 'SAMPLE_PLUGIN_DEBUG', 'Not set'))"
-```
-
-### Debug Commands
-
-```bash
-# View plugin configuration
-tutor plugins show sample
-
-# Check generated configuration
-tutor config printvalue PLUGINS
-
-# Inspect environment variables  
-tutor dev exec lms env | grep -E "(SAMPLE_PLUGIN|OPEN_EDX)"
-
-# Check plugin installation
-tutor dev exec lms pip list | grep sample
-
-# View logs
-tutor dev logs lms
-tutor dev logs learner-dashboard
-```
-
-### Getting Help
-
-1. **Tutor Documentation**: [Plugin Development Guide](https://docs.tutor.edly.io/plugins/intro.html)
-2. **Community**: [Tutor Community Forum](https://discuss.openedx.org/c/ops-and-deployment/tutor/)  
-3. **GitHub**: [Tutor Repository Issues](https://github.com/overhangio/tutor/issues)
-
-## Advanced Configuration
-
-### Multi-MFE Plugin Configuration
-
-```python
-# Configure multiple MFEs
-PLUGIN_SLOTS.add_items([
-    # Learner Dashboard
-    (
-        "learner-dashboard",
-        "course_list_slot",
-        """{ /* CourseList configuration */ }"""
-    ),
-    
-    # Course Authoring (if applicable)
-    (
-        "course-authoring", 
-        "course_outline_slot",
-        """{ /* Course outline customization */ }"""
-    ),
-])
-```
-
-### Custom Image Building
-
-```python
-@hooks.Filters.IMAGES_BUILD.add()
-def _build_custom_image(build_config):
-    """Build custom image with additional dependencies."""
-    
-    # Add system packages
-    build_config.add_dockerfile_commands(
-        "RUN apt-get update && apt-get install -y your-package"
-    )
-    
-    # Install Python packages
-    build_config.add_dockerfile_commands(
-        "RUN pip install your-python-package"
-    )
-    
-    # Copy additional files
-    build_config.add_dockerfile_commands(
-        "COPY custom-config.yml /openedx/config/"
-    )
-    
-    return build_config
-```
-
-### Database Migrations
-
-```python
-@hooks.Actions.LMS_READY.add()
-@hooks.Actions.CMS_READY.add() 
-def _run_plugin_migrations():
-    """Run plugin migrations when platform is ready."""
-    from django.core.management import call_command
-    call_command("migrate", "openedx_plugin_sample")
-```
-
-### Plugin Dependencies
-
-```python
-# In setup.py or pyproject.toml for your Tutor plugin
-dependencies = [
-    "tutor>=15.0.0",
-    "tutor-mfe",  # If using MFE customization
-]
-```
-
-### Environment Validation
-
-```python
-@hooks.Filters.CONFIG_UNIQUE.add()
-def _validate_plugin_config(config):
-    """Validate plugin configuration."""
-    
-    # Check required settings
-    if not config.get("SAMPLE_PLUGIN_API_KEY"):
-        raise ValueError("SAMPLE_PLUGIN_API_KEY is required")
-    
-    # Validate setting values
-    rate_limit = config.get("SAMPLE_PLUGIN_API_RATE_LIMIT", "60/minute")
-    if not re.match(r"^\d+/(minute|hour|day)$", rate_limit):
-        raise ValueError(f"Invalid rate limit format: {rate_limit}")
-    
-    return config
-```
-
-This Tutor plugin configuration provides a foundation for deploying the sample plugin in production Open edX environments. The modular approach allows you to adapt the configuration for different deployment scenarios while maintaining consistency across environments.
+**Backend plugin migrations don't run:** They run as `CLI_DO_INIT_TASKS`, which fire during `tutor local launch` / `tutor dev launch`. If you upgraded an existing deployment, run `tutor local do init` explicitly.

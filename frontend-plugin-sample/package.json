@@ -1,18 +1,29 @@
 {
   "name": "@openedx/plugin-sample",
   "version": "__semantically__released__",
-  "main": "dist/index.js",
-  "files": ["dist"],
+  "description": "Sample frontend-base App that customizes the learner-dashboard course list.",
   "repository": "https://github.com/openedx/sample-plugin",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
   "scripts": {
-    "build": "fedx-scripts babel src --out-dir dist --source-maps --ignore **/*.test.jsx,**/*.test.js"
+    "build": "tsc --project tsconfig.build.json",
+    "clean": "rm -rf dist"
   },
   "peerDependencies": {
-    "@edx/frontend-platform": "*",
-    "@openedx/paragon": "*",
-    "react": "*"
+    "@openedx/frontend-base": "^1.0.0-alpha || 0.0.0-dev",
+    "@openedx/paragon": "^23",
+    "react": "^18"
   },
   "devDependencies": {
-    "@openedx/frontend-build": "*"
+    "@openedx/frontend-base": "^1.0.0-alpha || 0.0.0-dev",
+    "@openedx/paragon": "^23",
+    "@types/react": "^18",
+    "react": "^18",
+    "typescript": "^5"
   }
 }

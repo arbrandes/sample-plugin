@@ -1,610 +1,188 @@
-# Frontend Plugin Implementation Guide
+# Frontend Plugin Implementation Guide (frontend-base)
 
-This directory contains a React component that demonstrates how to customize Open edX micro-frontends (MFEs) using the Frontend Plugin Framework. The plugin replaces the default course list in the learner dashboard with a custom implementation that includes course archiving functionality.
+This directory contains a sample [frontend-base](https://github.com/openedx/frontend-base) **App** that customizes the learner-dashboard's course list with archive/unarchive functionality.
+
+It is published to npm as `@openedx/plugin-sample` and plugged into a frontend-base site via the site config.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Frontend Plugin Framework](#frontend-plugin-framework)
-- [CourseList Component Example](#courselist-component-example)
-- [Slot Integration Patterns](#slot-integration-patterns)
-- [API Integration](#api-integration)
-- [Development Workflow](#development-workflow)
-- [Deployment Considerations](#deployment-considerations)
-- [Customizing This Example](#customizing-this-example)
+- [How a frontend-base App works](#how-a-frontend-base-app-works)
+- [Code Walkthrough](#code-walkthrough)
+- [Local Development](#local-development)
+- [Deployment with Tutor](#deployment-with-tutor)
+- [Customizing this Example](#customizing-this-example)
+- [Migrating from frontend-plugin-framework](#migrating-from-frontend-plugin-framework)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
 
-This frontend plugin demonstrates **Open edX MFE customization** using the Frontend Plugin Framework to replace the course list component in the learner dashboard.
+The plugin demonstrates how to extend an Open edX MFE without forking it:
 
-**What this plugin provides:**
-- **Custom CourseList Component**: Enhanced course display with archive functionality
-- **Backend API Integration**: Connects to the sample backend plugin APIs
-- **Slot Replacement Pattern**: Shows how to replace existing MFE components
-- **State Management**: React patterns for plugin development
-- **Authentication Integration**: Uses Open edX authentication system
+- **`CourseList.jsx`** is a React component that fetches archive state from the backend plugin's API and renders an archive-aware version of the learner-dashboard course list.
+- **`app.jsx`** exports a frontend-base `App` that registers a single `widgetReplace` operation against the learner-dashboard's `CourseList` slot.
+
+When the site config calls `addApp(siteConfig, sampleApp)`, the operation is applied automatically wherever the slot renders. No edits to the learner-dashboard repo are required.
 
 **Official Documentation:**
-- [Frontend Plugin Slots](https://docs.openedx.org/en/latest/site_ops/how-tos/use-frontend-plugin-slots.html)
-- [Available Plugin Slots Reference](https://docs.openedx.org/en/latest/site_ops/references/frontend-plugin-slots.html)
-- [OEP-65: Frontend Composability](https://docs.openedx.org/projects/openedx-proposals/en/latest/architectural-decisions/oep-0065-arch-frontend-composability.html)
+- [frontend-base on GitHub](https://github.com/openedx/frontend-base)
+- [tutor-mfe: Frontend-base site](https://github.com/overhangio/tutor-mfe#frontend-base-site) (covers `FRONTEND_APPS`, `FRONTEND_SLOTS`, and app-package patterns)
+- [Available slots in frontend-app-learner-dashboard](https://github.com/openedx/frontend-app-learner-dashboard/tree/master/src/slots)
 
-## Frontend Plugin Framework
+## How a frontend-base App works
 
-### What Are Plugin Slots?
+An `App` is a TypeScript/JavaScript object exported from an npm package. Its key fields:
 
-A "frontend plugin slot" is an area of a web page that can be customized with different visual elements without forking the codebase. This allows site operators to customize MFEs using configuration files.
+| Field | Purpose |
+| --- | --- |
+| `appId` | A globally-unique reverse-DNS string identifying the App. |
+| `slots` | An array of `SlotOperation` objects that mutate the site's slots when the App is registered. |
+| `routes` | (Optional) Routes the App contributes to the shell. Not used in this sample. |
+| `providers` | (Optional) React context providers wrapped around the shell. |
+| `config` | (Optional) Default values for app-specific runtime config keys. |
 
-**Key Concepts:**
-- **Slot**: A predefined customization point in an MFE
-- **Plugin**: Custom code that fills or modifies a slot
-- **Operations**: Actions you can take on slots (Insert, Modify, Replace)
+A `SlotOperation` describes one mutation:
 
-### Plugin Operations
-
-| Operation | What It Does | When To Use |
-|-----------|--------------|-------------|
-| **Insert** | Add new components before/after existing ones | Adding new features alongside existing ones |
-| **Modify** | Change properties of existing components | Tweaking existing functionality |
-| **Replace** | Completely replace existing components | Major customization (like this example) |
-
-### Discovering Available Slots
-
-**Slot Documentation**: [Available Frontend Plugin Slots](https://docs.openedx.org/en/latest/site_ops/references/frontend-plugin-slots.html)
-
-**MFE-Specific Slots**: Each MFE documents its slots in `/src/plugin-slots/` directory:
-- [Learner Dashboard Slots](https://github.com/openedx/frontend-app-learner-dashboard/tree/master/src/plugin-slots)
-- [Course Authoring Slots](https://github.com/openedx/frontend-app-course-authoring/tree/master/src/plugin-slots)
-- [Gradebook Slots](https://github.com/openedx/frontend-app-gradebook/tree/master/src/plugin-slots)
-
-## CourseList Component Example
-
-**File**: [`src/plugin.jsx`](./src/plugin.jsx)
-
-### Component Structure
-
-```jsx
-const CourseList = ({ courseListData }) => {
-  const [archivedCourses, setArchivedCourses] = useState(new Set());
-  const [loadingStates, setLoadingStates] = useState(new Map());
-
-  // Component implementation...
-};
-```
-
-### Key Features
-
-#### 1. Slot Data Integration
-
-The component receives `courseListData` from the learner dashboard slot:
-
-```jsx
-// Safety check for slot data
-if (!courseListData || !courseListData.visibleList) {
-  return <div>Loading courses...</div>;
-}
-
-const courses = courseListData.visibleList;
-```
-
-**Slot Props**: Each slot provides specific data. For CourseListSlot, see the [slot documentation](https://github.com/openedx/frontend-app-learner-dashboard/tree/master/src/plugin-slots/CourseListSlot#plugin-props).
-
-#### 2. Backend API Integration
-
-```jsx
-useEffect(() => {
-  const fetchArchivedCourses = async () => {
-    const client = getAuthenticatedHttpClient();
-    const lmsBaseUrl = getConfig().LMS_BASE_URL;
-
-    const response = await client.get(
-      `${lmsBaseUrl}/sample-plugin/api/v1/course-archive-status/`,
-      { params: { is_archived: true } }
-    );
-
-    const archivedCourseIds = new Set(
-      response.data.results.map((item) => item.course_id)
-    );
-    setArchivedCourses(archivedCourseIds);
-  };
-
-  fetchArchivedCourses();
-}, []);
-```
-
-**Key Patterns:**
-- **Authentication**: `getAuthenticatedHttpClient()` handles Open edX auth
-- **Configuration**: `getConfig().LMS_BASE_URL` gets platform URLs
-- **Error Handling**: Try/catch blocks for API failures
-
-#### 3. Open edX UI Components
-
-The plugin uses **Paragon** (Open edX's design system):
-
-```jsx
-import {
-  Card,
-  Container,
-  Row,
-  Col,
-  Badge,
-  Collapsible,
-  Button,
-  Spinner,
-  Dropdown,
-  IconButton,
-  Icon,
-} from "@openedx/paragon";
-import { Archive, Unarchive, MoreVert } from "@openedx/paragon/icons";
-```
-
-**Why Paragon**: Ensures consistent styling with the rest of Open edX interfaces.
-
-**Paragon Documentation**: [Paragon Design System](https://paragon-openedx.netlify.app/)
-
-### State Management
-
-#### Archive Status Management
-
-```jsx
-const [archivedCourses, setArchivedCourses] = useState(new Set());
-const [loadingStates, setLoadingStates] = useState(new Map());
-
-const handleArchiveToggle = async (courseId, isCurrentlyArchived) => {
-  setLoadingStates((prev) => new Map(prev).set(courseId, true));
-
-  try {
-    // API calls to backend
-    if (isCurrentlyArchived) {
-      // Unarchive logic
-    } else {
-      // Archive logic
-    }
-
-    // Update local state
-    setArchivedCourses((prev) => {
-      const newSet = new Set(prev);
-      isCurrentlyArchived ? newSet.delete(courseId) : newSet.add(courseId);
-      return newSet;
-    });
-  } catch (error) {
-    console.error("Archive operation failed:", error);
-  } finally {
-    setLoadingStates((prev) => {
-      const newMap = new Map(prev);
-      newMap.delete(courseId);
-      return newMap;
-    });
-  }
-};
-```
-
-**Patterns Used:**
-- **Optimistic Updates**: Update UI immediately, rollback on failure
-- **Loading States**: Track loading per course for better UX
-- **Immutable Updates**: Use functional setState for complex state
-
-## Slot Integration Patterns
-
-### CourseListSlot Integration
-
-**Target Slot**: `course_list_slot` in learner dashboard
-
-**Configuration Pattern** (for local development in `env.config.jsx`):
-
-```javascript
-import { DIRECT_PLUGIN, PLUGIN_OPERATIONS } from '@openedx/frontend-plugin-framework';
-import { CourseList } from '@openedx/plugin-sample';
-
-const config = {
-  pluginSlots: {
-    course_list_slot: {
-      keepDefault: false,  // Hide original component
-      plugins: [
-        {
-          op: PLUGIN_OPERATIONS.Insert,
-          widget: {
-            id: 'custom_course_list',
-            type: DIRECT_PLUGIN,
-            priority: 60,
-            RenderWidget: CourseList  // Your custom component
-          },
-        },
-      ],
-    },
-  },
+```js
+{
+  slotId: 'org.openedx.frontend.slot.learnerDashboard.courseList.v1',
+  id: 'org.openedx.frontend.widget.sample.courseList.v1',
+  op: WidgetOperationTypes.REPLACE,
+  relatedId: 'defaultContent',
+  component: CourseList,
 }
 ```
 
-### Plugin Configuration Options
+| Field | Purpose |
+| --- | --- |
+| `slotId` | Which slot to target. Each MFE documents its slot IDs under `src/slots/`. |
+| `id` | A unique reverse-DNS id for this widget. |
+| `op` | One of `APPEND`, `PREPEND`, `INSERT_BEFORE`, `INSERT_AFTER`, `REPLACE`, `REMOVE`. |
+| `relatedId` | The widget to anchor against. `defaultContent` refers to the slot's default rendering. |
+| `component` | A React component that receives the slot's props. Use `element` instead for inline JSX. |
+| `condition` | (Optional) `{ active: [roleId] }` to scope the op to specific routes. |
 
-| Option | Purpose | Values |
-|--------|---------|--------|
-| **keepDefault** | Show/hide original component | `true`, `false` |
-| **op** | Plugin operation type | `Insert`, `Modify`, `Replace` |
-| **priority** | Loading order | Higher numbers load later |
-| **type** | Plugin implementation type | `DIRECT_PLUGIN`, `IFRAME_PLUGIN` |
-| **RenderWidget** | Your React component | Component reference |
+This is **different** from the legacy `frontend-plugin-framework` API, which used `PLUGIN_OPERATIONS.Insert/Hide/Wrap` with a `widget` wrapper and was configured via `env.config.jsx`. See [Migrating from frontend-plugin-framework](#migrating-from-frontend-plugin-framework) below.
 
-### Slot Props and Data
+## Code Walkthrough
 
-Each slot provides specific props. For CourseListSlot:
+### `src/CourseList.jsx`
+
+The React component. It calls the backend plugin's REST API using frontend-base's auth client and config helpers:
 
 ```jsx
-const CourseList = ({
-  courseListData,  // Course data from platform
-  // Other props depend on the slot
-}) => {
-  // courseListData.visibleList - Array of course objects
-  // courseListData.course - Course metadata
-  // courseListData.courseRun - Course run information
-};
-```
-
-**Finding Slot Props**: Check the slot's README in the MFE repository, or examine the slot implementation in `/src/plugin-slots/`.
-
-## API Integration
-
-### Authentication Patterns
-
-**Open edX Authentication**:
-```jsx
-import { getAuthenticatedHttpClient } from "@edx/frontend-platform/auth";
+import { getAuthenticatedHttpClient, getSiteConfig } from "@openedx/frontend-base";
 
 const client = getAuthenticatedHttpClient();
-// Client automatically includes authentication headers
+const lmsBaseUrl = getSiteConfig().lmsBaseUrl;
 ```
 
-**Configuration Access**:
-```jsx
-import { getConfig } from "@edx/frontend-platform";
+Note that in frontend-base these utilities are imported from `@openedx/frontend-base` directly (not `@edx/frontend-platform`), and `lmsBaseUrl` is a camelCase field on the site config object (not `LMS_BASE_URL` from `getConfig()`).
 
-const lmsBaseUrl = getConfig().LMS_BASE_URL;
-const apiUrl = `${lmsBaseUrl}/sample-plugin/api/v1/course-archive-status/`;
-```
+The slot delivers a `courseListData` prop with `visibleList`, `course`, and `courseRun` fields. The component splits courses into active/archived buckets and renders Paragon cards with an archive toggle that PATCHes the backend.
 
-### Error Handling Best Practices
+### `src/app.jsx`
 
-```jsx
-try {
-  const response = await client.post(url, data);
-  // Success handling
-} catch (error) {
-  console.error("API Error:", {
-    status: error.response?.status,
-    statusText: error.response?.statusText,
-    data: error.response?.data,
-    message: error.message,
-  });
+Declares the App and its single slot operation. The op uses `WidgetOperationTypes.REPLACE` with `relatedId: 'defaultContent'` so the upstream default course list is hidden and ours takes its place.
 
-  // User feedback
-  // Consider using toast notifications or error states
-}
-```
+### `src/index.jsx`
 
-### API Response Handling
+Re-exports the App as the default and the underlying React component as a named export, so site operators can `addApp(siteConfig, sampleApp)` and tests can mount `<CourseList />` directly.
 
-```jsx
-// Handle paginated responses
-const response = await client.get(url);
-const items = response.data.results || [];  // DRF pagination format
+## Local Development
 
-// Handle different response formats
-if (response.data && Array.isArray(response.data)) {
-  // Direct array response
-} else if (response.data.results) {
-  // Paginated response
-} else {
-  // Single object response
-}
-```
+### Develop the App inside a site
 
-## Development Workflow
+The most ergonomic loop is to bind-mount your frontend-base site (and optionally an app) so changes hot-reload:
 
-### Prerequisites
+1. Have a frontend-base site available locally (e.g., a clone of [`frontend-template-site`](https://github.com/openedx/frontend-template-site)).
+2. Add this package as a workspace dependency in the site's `package.json`, pointing at a relative path or a `file:` reference.
+3. In the site's `site.config.dev.tsx`:
 
-1. **MFE Setup**: Have a learner dashboard MFE running locally
-2. **Backend Plugin**: Install the backend plugin (see [`../backend-plugin-sample/README.md`](../backend-plugin-sample/README.md))
-3. **Node.js**: Version 16+ with npm or yarn
+   ```tsx
+   import { addApp, EnvironmentTypes, SiteConfig, footerApp, headerApp, shellApp } from '@openedx/frontend-base';
+   import { learnerDashboardApp } from '@openedx/frontend-app-learner-dashboard';
+   import sampleApp from '@openedx/plugin-sample';
 
-### Local Development Setup
+   const siteConfig: SiteConfig = {
+     // ... siteId, baseUrl, lmsBaseUrl, etc. ...
+     environment: EnvironmentTypes.DEVELOPMENT,
+     apps: [shellApp, headerApp, footerApp, learnerDashboardApp],
+   };
 
-#### Step 0: Build Plugin
+   addApp(siteConfig, sampleApp);
+
+   export default siteConfig;
+   ```
+
+4. Run `npm run dev` in the site. The site's bundler picks up changes in this package automatically.
+
+### Develop the App via tutor-mfe
+
+If you'd rather develop against a Tutor stack:
 
 ```bash
-cd /path/to/sample-plugin/frontend-plugin-sample
+tutor mounts add /path/to/sample-plugin/frontend-plugin-sample
+tutor dev launch
+```
+
+The `mfe-dev` service bind-mounts the package into the site's workspace and watches for changes. The site is served at `http://apps.local.openedx.io:8080`.
+
+### Build for publish
+
+```bash
+npm install
 npm run build
 ```
 
-#### Step 1: Install Plugin Package
+The output goes to `dist/`. The package is publishable to npm as `@openedx/plugin-sample`.
 
-```bash
-# In your MFE directory (e.g., frontend-app-learner-dashboard)
-npm install /path/to/sample-plugin/frontend-plugin-sample
-```
+## Deployment with Tutor
 
-#### Step 2: Create env.config.jsx
+In production, the package is installed into the frontend-base site by [`tutor-contrib-sample`](../tutor-contrib-sample/), which:
 
-Create `env.config.jsx` in your MFE root (not committed to repo):
+1. Adds an entry to `FRONTEND_APPS` so tutor-mfe installs the npm package into the site workspace.
+2. Adds an `mfe-site-config-imports` patch to import the App.
+3. Adds an `mfe-site-config` patch to call `addApp(siteConfig, sampleApp)`.
 
-```javascript
-import { DIRECT_PLUGIN, PLUGIN_OPERATIONS } from '@openedx/frontend-plugin-framework';
-import { CourseList } from '@openedx/plugin-sample';
+See [`../tutor-contrib-sample/README.md`](../tutor-contrib-sample/README.md) for the full plugin.
 
-const config = {
-  pluginSlots: {
-    course_list_slot: {
-      keepDefault: false,
-      plugins: [
-        {
-          op: PLUGIN_OPERATIONS.Insert,
-          widget: {
-            id: 'custom_course_list',
-            type: DIRECT_PLUGIN,
-            priority: 60,
-            RenderWidget: CourseList
-          },
-        },
-      ],
-    },
-  },
-}
+## Customizing this Example
 
-export default config;
-```
+**Target a different slot:** Replace the `slotId` in `src/app.jsx`. The available slot IDs are documented under each frontend-base app's `src/slots/` directory (e.g., the [learner-dashboard slots](https://github.com/openedx/frontend-app-learner-dashboard/tree/master/src/slots)).
 
-#### Step 3: Create module.config.js
+**Use a different operation:** Swap `WidgetOperationTypes.REPLACE` for `APPEND`, `PREPEND`, `INSERT_BEFORE`, `INSERT_AFTER`, or `REMOVE`. With `APPEND`/`PREPEND`, drop `relatedId` and the default content stays alongside your widget.
 
-Create `module.config.js` for local development:
+**Scope to specific routes:** Add a `condition: { active: ['org.openedx.frontend.role.learnerDashboard'] }` to the op so it only fires on the learner-dashboard routes. Useful when the same slot is rendered by multiple apps.
 
-```javascript
-module.exports = {
-  localModules: [
-    {
-      moduleName: '@openedx/plugin-sample',
-      dir: '/path/to/sample-plugin/frontend-plugin-sample'
-    },
-  ],
-};
-```
+**Register multiple ops:** Push more entries into the App's `slots` array. They can target the same or different slots.
 
-**Purpose**: Webpack uses your local plugin code instead of the installed package.
+## Migrating from frontend-plugin-framework
 
-#### Step 4: Start Development
+If you have an existing `frontend-plugin-framework` plugin, the mechanical translation is:
 
-```bash
-# In your MFE directory
-npm ci
-npm start
-```
+| Legacy | frontend-base |
+| --- | --- |
+| `import { ... } from '@openedx/frontend-plugin-framework'` | `import { ... } from '@openedx/frontend-base'` |
+| `import { getConfig } from '@edx/frontend-platform'` | `import { getSiteConfig } from '@openedx/frontend-base'` |
+| `import { getAuthenticatedHttpClient } from '@edx/frontend-platform/auth'` | `import { getAuthenticatedHttpClient } from '@openedx/frontend-base'` |
+| `PLUGIN_OPERATIONS.Insert` (DIRECT_PLUGIN) | `WidgetOperationTypes.APPEND` (or `PREPEND`/`INSERT_BEFORE`/`INSERT_AFTER`) |
+| `PLUGIN_OPERATIONS.Hide` on `default_contents` | `WidgetOperationTypes.REMOVE` with `relatedId: 'defaultContent'` |
+| `PLUGIN_OPERATIONS.Hide` + `Insert` (a.k.a. Replace) | `WidgetOperationTypes.REPLACE` with `relatedId: 'defaultContent'` |
+| `widget: { id, RenderWidget: Comp }` | flat `id` + `component: Comp` |
+| Slot id `course_list_slot` or legacy reverse-DNS | New reverse-DNS id documented in the frontend-base app |
+| Config in `env.config.jsx` | App object's `slots` array, registered via `addApp` |
+| Build via `fedx-scripts` (`@openedx/frontend-build`) | Build via `tsc` (or any vanilla bundler); peer-depend on `@openedx/frontend-base` |
+| `LMS_BASE_URL` from `getConfig()` | `lmsBaseUrl` from `getSiteConfig()` |
 
-### Development vs Production Configuration
-
-**Local Development**:
-- Uses `env.config.jsx` for slot configuration
-- Uses `module.config.js` for local code loading
-- Hot reload for faster development
-
-**Production Deployment**:
-- Configuration via Tutor plugins
-- Plugin installed as npm package
-- Optimized builds and caching
-
-### Testing Frontend Plugins
-
-#### Unit Testing
-
-```javascript
-// Example test structure
-import { render, screen } from '@testing-library/react';
-import { CourseList } from './plugin';
-
-describe('CourseList Plugin', () => {
-  test('renders course list with archive functionality', () => {
-    const mockCourseData = {
-      visibleList: [/* mock course data */]
-    };
-
-    render(<CourseList courseListData={mockCourseData} />);
-
-    expect(screen.getByText('Archive')).toBeInTheDocument();
-  });
-});
-```
-
-#### Integration Testing
-
-Test within the actual MFE environment:
-
-1. Set up MFE with plugin installed
-2. Create test courses in platform
-3. Verify plugin functionality
-4. Test API integration
-5. Check error handling
-
-## Deployment Considerations
-
-### Production Deployment with Tutor
-
-**Tutor Plugin Configuration** (see [`../tutor-contrib-sample/README.md`](../tutor-contrib-sample/README.md)):
-
-```python
-# In tutor plugin
-PLUGIN_SLOTS.add_items([
-    (
-        "learner-dashboard",
-        "custom_course_list",
-        """
-        {
-          op: PLUGIN_OPERATIONS.Insert,
-          type: DIRECT_PLUGIN,
-          priority: 50,
-          RenderWidget: CourseList
-        }"""
-    ),
-])
-```
-
-### Performance Considerations
-
-**Bundle Size**:
-- Frontend plugins are included in MFE bundles
-- Minimize dependencies and use tree shaking
-- Consider lazy loading for large plugins
-
-**API Performance**:
-- Implement proper caching strategies
-- Use pagination for large datasets
-- Optimize backend API response times
-
-**User Experience**:
-- Show loading states during API calls
-- Handle errors gracefully
-- Provide offline fallback behavior
-
-### Browser Compatibility
-
-- Follow MFE browser support requirements
-- Test across different browsers
-- Use polyfills if needed for newer JS features
-
-## Customizing This Example
-
-### For Different Slots
-
-1. **Identify Target Slot**: Check [available slots](https://docs.openedx.org/en/latest/site_ops/references/frontend-plugin-slots.html)
-2. **Study Slot Props**: Examine slot documentation for available data
-3. **Adapt Component**: Modify component to work with slot-specific data
-4. **Update Configuration**: Change slot name in plugin configuration
-
-**Example - Adapting for Header Slot**:
-
-```jsx
-// Original CourseList component
-const CourseList = ({ courseListData }) => { /* ... */ };
-
-// Adapted for header slot
-const CustomHeader = ({ logo, mainMenu, userMenu }) => {
-  // Use header-specific props
-  return (
-    <Header logo={logo} mainMenu={mainMenu}>
-      {/* Your customizations */}
-    </Header>
-  );
-};
-```
-
-### Adding New Features
-
-**Common Extension Patterns**:
-
-```jsx
-// Add new state
-const [newFeatureData, setNewFeatureData] = useState([]);
-
-// Add new API calls
-useEffect(() => {
-  const fetchNewFeatureData = async () => {
-    // Your API integration
-  };
-}, []);
-
-// Add new UI elements
-return (
-  <Container>
-    {/* Existing course list */}
-    {/* Your new feature */}
-    <YourNewComponent data={newFeatureData} />
-  </Container>
-);
-```
-
-### Component Composition
-
-**Reusable Components**:
-```jsx
-// Create reusable sub-components
-const ArchiveButton = ({ courseId, isArchived, onToggle }) => (
-  <Button onClick={() => onToggle(courseId, isArchived)}>
-    {isArchived ? 'Unarchive' : 'Archive'}
-  </Button>
-);
-
-// Use in main component
-const CourseList = ({ courseListData }) => (
-  <div>
-    {courses.map(course => (
-      <Card key={course.id}>
-        {/* Course info */}
-        <ArchiveButton
-          courseId={course.id}
-          isArchived={isArchived(course.id)}
-          onToggle={handleArchiveToggle}
-        />
-      </Card>
-    ))}
-  </div>
-);
-```
+If a port isn't practical yet, the [frontend-base-compat](https://github.com/openedx/frontend-base-compat) shim lets a legacy `env.config.jsx` run on a frontend-base site. tutor-mfe opts plugins in via `FRONTEND_COMPAT_PLUGINS` or `FRONTEND_COMPAT_SLOTS`.
 
 ## Troubleshooting
 
-### Common Issues
+**App registers but the slot doesn't change:** Confirm the `slotId` matches the target frontend-base app's slot. Slot IDs changed during the FPF -> frontend-base migration (e.g., `org.openedx.frontend.learner_dashboard.course_list.v1` -> `org.openedx.frontend.slot.learnerDashboard.courseList.v1`).
 
-**Plugin Not Loading**:
-- Check `env.config.jsx` slot name matches target slot
-- Verify plugin is installed (`npm list @openedx/plugin-sample`)
-- Ensure MFE supports the plugin framework version
-- Check browser console for JavaScript errors
+**`getConfig is not a function` or similar at runtime:** Your code is still importing from `@edx/frontend-platform`. Swap to `@openedx/frontend-base`. If you can't change the source, install [frontend-base-compat](https://github.com/openedx/frontend-base-compat) instead.
 
-**Slot Data Issues**:
-- Console.log slot props to understand data structure
-- Check if slot provides expected data (some slots may not provide certain props)
-- Verify slot exists in the MFE version you're using
+**App leaks into another MFE's routes:** Add `condition: { active: [roleId] }` to the op, with the role registered by the target app (e.g., `org.openedx.frontend.role.learnerDashboard`).
 
-**API Integration Problems**:
-- Verify backend plugin is installed and running
-- Check API URLs match backend configuration
-- Ensure CORS settings allow frontend-backend communication
-- Test API endpoints directly in browser/Postman
-
-**Styling Issues**:
-- Use Paragon components for consistent styling
-- Check CSS specificity conflicts
-- Verify theme variables are available
-- Test across different screen sizes
-
-**Development Setup Issues**:
-- Ensure `module.config.js` path is correct
-- Check that both `env.config.jsx` and `module.config.js` are in MFE root
-- Verify file permissions and syntax
-
-### Debugging Techniques
-
-**Console Debugging**:
-```jsx
-// Add debug logging
-console.log("DEBUG: CourseList props:", { courseListData });
-console.log("DEBUG: API response:", response.data);
-console.log("DEBUG: Archive states:", Array.from(archivedCourses));
-```
-
-**React Developer Tools**:
-- Use React DevTools to inspect component state
-- Check component hierarchy and props
-- Monitor state changes during interactions
-
-**Network Debugging**:
-- Use browser DevTools Network tab
-- Check API request/response details
-- Verify authentication headers are present
-
-### Getting Help
-
-1. **Documentation**: Start with [official frontend plugin documentation](https://docs.openedx.org/en/latest/site_ops/how-tos/use-frontend-plugin-slots.html)
-2. **MFE-Specific Help**: Check individual MFE repositories for slot documentation
-3. **Community**: [Open edX Slack #frontend-platform channel](https://openedx.org/slack)
-4. **Issues**: Report bugs in relevant MFE repositories or this sample repository
-
-This frontend plugin demonstrates the power and flexibility of the Open edX Frontend Plugin Framework. By following these patterns, you can create rich customizations that integrate seamlessly with the Open edX ecosystem.
+**Multiple widgets render where you expected a replace:** `op: APPEND` keeps `defaultContent` and adds yours alongside it. Use `REPLACE` (with `relatedId: 'defaultContent'`) when you want only your widget to render.

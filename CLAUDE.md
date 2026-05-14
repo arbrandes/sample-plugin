@@ -24,14 +24,18 @@ This is a **sample plugin repository** that demonstrates all major Open edX plug
 - Maintain working integration between all plugin types
 - Keep examples realistic but not overly complex
 
+**Branch context:**
+This `frontend-base` branch targets tutor-mfe's [frontend-base site](https://github.com/overhangio/tutor-mfe#frontend-base-site). The frontend plugin is shipped as a frontend-base `App` (not an FPF `env.config.jsx` contribution), and the Tutor plugin uses `FRONTEND_APPS` + `mfe-site-config-*` patches rather than `PLUGIN_SLOTS`. See [Port a Frontend Plugin from frontend-plugin-framework to frontend-base](https://docs.openedx.org/en/latest/site_ops/how-tos/port-frontend-plugin-to-frontend-base.html) for the porting guide.
+
 **Key Files and Their Relationships:**
 - `backend-plugin-sample/openedx_plugin_sample/apps.py` - Plugin registration and Django integration
 - `backend-plugin-sample/openedx_plugin_sample/signals.py` - Open edX Events handlers
 - `backend-plugin-sample/openedx_plugin_sample/pipeline.py` - Open edX Filters implementation
 - `backend-plugin-sample/openedx_plugin_sample/models.py` - CourseArchiveStatus model (business logic)
 - `backend-plugin-sample/openedx_plugin_sample/views.py` - REST API endpoints consumed by frontend
-- `frontend-plugin-sample/src/plugin.jsx` - React component that replaces course list slot
-- `tutor-contrib-sample/tutorsample/plugin.py` - Deployment configuration (currently basic template)
+- `frontend-plugin-sample/src/CourseList.jsx` - React component (imports from `@openedx/frontend-base`)
+- `frontend-plugin-sample/src/app.jsx` - frontend-base `App` with slot operations targeting the learner-dashboard
+- `tutor-contrib-sample/tutorsample/plugin.py` - Tutor plugin: backend pip install + `FRONTEND_APPS` + site-config patches
 
 ## Build/Lint/Test Commands
 - Make sure to set the following so that test output is not too verbose: `export PYTEST_ADDOPTS="--disable-warnings --no-header --tb=short"`
@@ -69,6 +73,6 @@ Always run `make quality` and fix issues before creating a PR to ensure consiste
 ### Open edX Plugin Patterns
 - **API Development**: Use `perform_create()`/`perform_update()` in viewsets for business logic
 - **Settings**: Use additive approach for `OPEN_EDX_FILTERS_CONFIG` to avoid plugin conflicts
-- **Frontend**: Use Paragon components and `getAuthenticatedHttpClient()` for platform integration
+- **Frontend**: Use Paragon components and import `getAuthenticatedHttpClient`/`getSiteConfig` from `@openedx/frontend-base` (not `@edx/frontend-platform`). The package's default export is the frontend-base `App`.
 - **Events**: Import signal handlers in `apps.py ready()` method for proper registration
 - **Filters**: Return dictionaries with same parameter names as input, handle all scenarios
